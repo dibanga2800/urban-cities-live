@@ -1,0 +1,53 @@
+# Environment variables and secrets
+.env
+.env.*
+*.tfvars
+!terraform.tfvars.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# Airflow / Astro
+.astro/
+logs/
+airflow.db
+airflow.cfg
+webserver_config.py
+*.log
+
+# Data files
+*.parquet
+*.csv
+*.json
+!deployment-summary.json
+!etl_state.json
+notebook/data/raw/*
+notebook/data/output/*
+notebook/data/parquet/*
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,27 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and update with your values
+
+# Resource Group
+resource_group_name = "urban-cities-rg"
+location            = "East US"
+
+# Storage Account (ADLS Gen2)
+# Must be globally unique, 3-24 characters, lowercase alphanumeric only
+storage_account_name = "urbancitiesadls123"
+
+# Data Factory
+data_factory_name = "urban-cities-adf"
+
+# PostgreSQL Server
+# Must be globally unique
+postgresql_server_name   = "urban-cities-psql-server"
+postgresql_admin_username = "psqladmin"
+postgresql_admin_password = "YourStrongPassword123!"
+postgresql_database_name  = "urban_cities_db"
+
+# Tags
+tags = {
+  Environment = "Development"
+  Project     = "Urban Cities Service"
+  ManagedBy   = "Terraform"
+}
