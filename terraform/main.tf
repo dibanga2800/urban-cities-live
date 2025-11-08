@@ -160,10 +160,11 @@ resource "null_resource" "create_sql_table" {
 
   triggers = {
     database_id = azurerm_mssql_database.main.id
+    script_hash = filemd5("${path.module}/../scripts/sql/create_sql_table.py")
   }
 
   provisioner "local-exec" {
-    command     = "cd '${path.module}/../notebook'; python create_sql_table.py"
+    command     = "python '${path.module}/../scripts/sql/create_sql_table.py'"
     interpreter = ["PowerShell", "-Command"]
     on_failure  = continue  # Allow manual execution if provisioner fails
   }
@@ -180,11 +181,12 @@ resource "null_resource" "create_adf_pipeline" {
   ]
 
   triggers = {
-    adf_id = azurerm_data_factory.main.id
+    adf_id      = azurerm_data_factory.main.id
+    script_hash = filemd5("${path.module}/../scripts/adf/create_adf_pipeline.py")
   }
 
   provisioner "local-exec" {
-    command     = "cd '${path.module}/../notebook'; python create_adf_pipeline.py"
+    command     = "python '${path.module}/../scripts/adf/create_adf_pipeline.py'"
     interpreter = ["PowerShell", "-Command"]
     on_failure  = continue  # Allow manual execution if provisioner fails
   }

@@ -53,19 +53,15 @@ cd terraform
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your values
 
-# 4. Deploy Azure resources
+# 4. Deploy Azure resources (includes automatic ADF pipeline and SQL table creation)
 terraform init
 terraform apply -auto-approve
 
-# 5. Create ADF pipeline
-cd ..\scripts\adf
-python create_adf_pipeline.py
-
-# 6. Start Airflow
-cd ..\..\astro-airflow
+# 5. Start Airflow
+cd ..\astro-airflow
 astro dev start
 
-# 7. Access Airflow UI at http://localhost:8080
+# 6. Access Airflow UI at http://localhost:8080
 ```
 
 ## Project Structure

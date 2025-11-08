@@ -32,7 +32,7 @@ from azure.mgmt.datafactory.models import (
 )
 from dotenv import load_dotenv
 
-# Load environment variables from Airflow .env file
+# Load environment variables from Airflow .env file (repo-root/astro-airflow/.env)
 env_path = os.path.join(os.path.dirname(__file__), '..', '..', 'astro-airflow', '.env')
 load_dotenv(env_path)
 
@@ -57,13 +57,25 @@ def create_adf_pipeline():
     sql_username = os.getenv('SQL_USERNAME')
     sql_password = os.getenv('SQL_PASSWORD')
     
-    print(f"Configuration:")
-    print(f"  • Resource Group: {resource_group}")
-    print(f"  • Data Factory: {adf_name}")
-    print(f"  • Storage Account: {storage_account}")
-    print(f"  • SQL Server: {sql_server}")
-    print(f"  • SQL Database: {sql_database}\n")
+    print("Configuration:")
+    print(f"  - Resource Group: {resource_group}")
+    print(f"  - Data Factory: {adf_name}")
+    print(f"  - Storage Account: {storage_account}")
+    print(f"  - SQL Server: {sql_server}")
+    print(f"  - SQL Database: {sql_database}\n")
     
+    # Validate required auth variables
+    missing = [name for name, val in {
+        'AZURE_TENANT_ID': tenant_id,
+        'AZURE_CLIENT_ID': client_id,
+        'AZURE_CLIENT_SECRET': client_secret,
+        'AZURE_SUBSCRIPTION_ID': subscription_id
+    }.items() if not val]
+    if missing:
+        print(f"\nERROR: Missing required Azure auth environment variables: {', '.join(missing)}")
+        print("Ensure astro-airflow/.env contains these values before running the script.")
+        return False
+
     # Create credential
     credential = ClientSecretCredential(
         tenant_id=tenant_id,
@@ -85,16 +97,15 @@ def create_adf_pipeline():
                 service_principal_key=SecureString(value=client_secret)
             )
         )
-        
         adf_client.linked_services.create_or_update(
             resource_group,
             adf_name,
             "AzureDataLakeStorage_LinkedService",
             adls_linked_service
         )
-        print("   ✓ ADLS Linked Service created: AzureDataLakeStorage_LinkedService")
+        print("   [OK] ADLS Linked Service created: AzureDataLakeStorage_LinkedService")
     except Exception as e:
-        print(f"   ✗ Error creating ADLS linked service: {e}")
+        print(f"   [ERROR] Error creating ADLS linked service: {e}")
         return False
     
     # Step 2: Create SQL Database Linked Service
@@ -105,23 +116,21 @@ def create_adf_pipeline():
                 connection_string=f"Server=tcp:{sql_server},1433;Database={sql_database};User ID={sql_username};Password={sql_password};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
             )
         )
-        
         adf_client.linked_services.create_or_update(
             resource_group,
             adf_name,
             "AzureSqlDatabase_LinkedService",
             sql_linked_service
         )
-        print("   ✓ SQL Database Linked Service created: AzureSqlDatabase_LinkedService")
+        print("   [OK] SQL Database Linked Service created: AzureSqlDatabase_LinkedService")
     except Exception as e:
-        print(f"   ✗ Error creating SQL linked service: {e}")
+        print(f"   [ERROR] Error creating SQL linked service: {e}")
         return False
     
     # Step 3: Create Source Dataset (ADLS Parquet) with parameterized file name
     print("\nStep 3: Creating Source Dataset (ADLS Parquet)...")
     try:
         from azure.mgmt.datafactory.models import DatasetFolder, ParquetDataset
-        
         source_dataset = DatasetResource(
             properties=ParquetDataset(
                 linked_service_name=LinkedServiceReference(
@@ -135,16 +144,15 @@ def create_adf_pipeline():
                 )
             )
         )
-        
         adf_client.datasets.create_or_update(
             resource_group,
             adf_name,
             "SourceDataset_ADLS_Parquet",
             source_dataset
         )
-        print("   ✓ Source Dataset created: SourceDataset_ADLS_Parquet")
+        print("   [OK] Source Dataset created: SourceDataset_ADLS_Parquet")
     except Exception as e:
-        print(f"   ✗ Error creating source dataset: {e}")
+        print(f"   [ERROR] Error creating source dataset: {e}")
         return False
     
     # Step 4: Create Sink Dataset (SQL Table)
@@ -159,16 +167,15 @@ def create_adf_pipeline():
                 table_name="nyc_311_requests"
             )
         )
-        
         adf_client.datasets.create_or_update(
             resource_group,
             adf_name,
             "SinkDataset_SQL_Table",
             sink_dataset
         )
-        print("   ✓ Sink Dataset created: SinkDataset_SQL_Table")
+        print("   [OK] Sink Dataset created: SinkDataset_SQL_Table")
     except Exception as e:
-        print(f"   ✗ Error creating sink dataset: {e}")
+        print(f"   [ERROR] Error creating sink dataset: {e}")
         return False
     
     # Step 5: Create Copy Activity pipeline (robust, parameterized by fileName)
@@ -216,11 +223,10 @@ def create_adf_pipeline():
             pipeline
         )
 
-        print("   ✓ Copy Activity pipeline created/updated successfully: CopyProcessedDataToSQL")
-        print("   ✓ Using TRUNCATE mode - single master file contains all deduplicated data")
-
+        print("   [OK] Copy Activity pipeline created/updated successfully: CopyProcessedDataToSQL")
+        print("   [OK] Using TRUNCATE mode - single master file contains all deduplicated data")
     except Exception as e:
-        print(f"   ✗ Error creating Copy Activity pipeline: {e}")
+        print(f"   [ERROR] Error creating Copy Activity pipeline: {e}")
         return False
     
     # Step 6 (optional): Also create a Mapping Data Flow pipeline with corrected script
@@ -265,22 +271,22 @@ def create_adf_pipeline():
             df_pipeline
         )
 
-        print("   ✓ Data Flow pipeline created/updated: CopyProcessedDataToSQL_DataFlow")
+        print("   [OK] Data Flow pipeline created/updated: CopyProcessedDataToSQL_DataFlow")
     except Exception as e:
-        print(f"   ⚠ Skipped Data Flow pipeline due to error: {e}")
+        print(f"   [WARN] Skipped Data Flow pipeline due to error: {e}")
 
     # Summary
     print("\n" + "="*60)
-    print("  ✓ ADF PIPELINE SETUP COMPLETED!")
+    print("  ADF PIPELINE SETUP COMPLETED")
     print("="*60)
     print("\nCreated Resources:")
-    print("  • Linked Services:")
+    print("  - Linked Services:")
     print("    - AzureDataLakeStorage_LinkedService")
     print("    - AzureSqlDatabase_LinkedService")
-    print("  • Datasets:")
+    print("  - Datasets:")
     print("    - SourceDataset_ADLS_Parquet (processed container)")
     print("    - SinkDataset_SQL_Table (nyc_311_requests)")
-    print("  • Pipeline:")
+    print("  - Pipeline:")
     print("    - CopyProcessedDataToSQL")
     print("\nNext Steps:")
     print("  1. Create SQL table schema (nyc_311_requests)")
@@ -296,7 +302,7 @@ if __name__ == "__main__":
         success = create_adf_pipeline()
         exit(0 if success else 1)
     except Exception as e:
-        print(f"\n✗ Pipeline creation failed: {str(e)}")
+        print(f"\n[ERROR] Pipeline creation failed: {str(e)}")
         import traceback
         traceback.print_exc()
         exit(1)

@@ -511,7 +511,7 @@ default_args = {
     'owner': 'data-engineering-team',
     'depends_on_past': False,
     'start_date': datetime(2025, 11, 4),  # Yesterday's date
-    'email': ['your-email@example.com'],
+    'email': ['dibanga2800@gmail.com'],
     'email_on_failure': True,
     'email_on_retry': False,
     'retries': 3,
@@ -523,7 +523,7 @@ dag = DAG(
     'nyc_311_incremental_etl_azure',
     default_args=default_args,
     description='NYC 311 Incremental ETL with Azure Data Lake and ADF',
-    schedule=timedelta(hours=1),  # Run every 1 hour
+    schedule=timedelta(minutes=1),  # Run every 1 minute
     catchup=False,
     max_active_runs=1,
     tags=['nyc311', 'etl', 'azure', 'incremental']

@@ -3,6 +3,7 @@
 .env.*
 *.tfvars
 !terraform.tfvars.example
+.App_Mgt*
 
 # Python
 __pycache__/

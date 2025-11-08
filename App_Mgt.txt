@@ -1,0 +1,35 @@
+Running the App
+
+#check Azure login
+
+cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\terraform"; $env:Path += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"; az account show
+
+#Destroy Infrastructure
+cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\terraform"; $env:Path += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"; & "C:\Users\David Ibanga\terraform\terraform.exe" destroy -auto-approve
+
+
+#Apply terraform
+cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\terraform"; $env:Path += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"; & "C:\Users\David Ibanga\terraform\terraform.exe" apply -auto-approve
+
+#Apply with headers:
+cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\terraform"; $env:Path += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"; Write-Host "`n========================================" -ForegroundColor Cyan; Write-Host "FULL AUTOMATION TEST - CREATING FROM SCRATCH" -ForegroundColor Cyan; Write-Host "========================================`n" -ForegroundColor Cyan; & "C:\Users\David Ibanga\terraform\terraform.exe" apply -auto-approve
+
+
+#Running Airflow:
+cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\astro-airflow"; & "C:\Users\David Ibanga\AppData\Local\Microsoft\WinGet\Packages\Astronomer.Astro_Microsoft.Winget.Source_8wekyb3d8bbwe\astro.exe" dev ps
+
+
+#Trigger DAGS
+& "C:\Users\David Ibanga\AppData\Local\Microsoft\WinGet\Packages\Astronomer.Astro_Microsoft.Winget.Source_8wekyb3d8bbwe\astro.exe" dev run dags trigger nyc_311_incremental_etl_azure
+
+#Restart Airflow
+cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\astro-airflow"; & "C:\Users\David Ibanga\AppData\Local\Microsoft\WinGet\Packages\Astronomer.Astro_Microsoft.Winget.Source_8wekyb3d8bbwe\astro.exe" dev restart
+
+#Troubleshooting AIRflow
+astro dev run dags list
+
+astro dev run dags list-runs -d nyc_311_incremental_etl_azure --state running --no-backfill
+
+astro dev logs --scheduler --follow=false | Select-Object -Last 50
+
+astro dev run dags trigger nyc_311_incremental_etl_azure
