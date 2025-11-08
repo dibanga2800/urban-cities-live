@@ -180,8 +180,15 @@ def create_adf_pipeline():
             )
         )
 
-        # Define SQL sink (basic insert). For test runs, clear table to avoid PK conflicts.
-        sql_sink = SqlSink(pre_copy_script="TRUNCATE TABLE dbo.nyc_311_requests;")
+        # Define SQL sink - Use UPSERT logic to handle duplicates
+        # Changed from TRUNCATE to avoid data loss when processing multiple files
+        sql_sink = SqlSink(
+            write_behavior="upsert",
+            upsert_settings={
+                "useTempDB": True,
+                "keys": ["unique_key"]  # Use unique_key as the merge key
+            }
+        )
 
         # Build Copy Activity
         copy_activity = CopyActivity(
@@ -210,6 +217,7 @@ def create_adf_pipeline():
         )
 
         print("   ✓ Copy Activity pipeline created/updated successfully: CopyProcessedDataToSQL")
+        print("   ✓ Using UPSERT mode to prevent duplicates and preserve existing data")
 
     except Exception as e:
         print(f"   ✗ Error creating Copy Activity pipeline: {e}")

@@ -16,7 +16,13 @@ import pandas as pd
 # Astro project structure - include directory is available on Python path
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.empty import EmptyOperator
+try:
+    from airflow.operators.dummy import DummyOperator as EmptyOperator
+except ImportError:
+    try:
+        from airflow.operators.empty import EmptyOperator
+    except ImportError:
+        from airflow.operators.dummy_operator import DummyOperator as EmptyOperator
 
 # Import ETL modules from include directory
 from include.Extraction import DataExtractor
@@ -27,6 +33,31 @@ import json
 # State file for tracking last processed timestamp
 # In Astro, /usr/local/airflow/include is mounted
 STATE_FILE = '/usr/local/airflow/include/data/etl_state.json'
+ADF_PROCESSED_FILES = '/usr/local/airflow/include/data/adf_processed_files.json'
+
+def load_processed_files():
+    """Load list of files already processed by ADF"""
+    try:
+        if os.path.exists(ADF_PROCESSED_FILES):
+            with open(ADF_PROCESSED_FILES, 'r') as f:
+                data = json.load(f)
+                return set(data.get('processed_files', []))
+    except Exception as e:
+        print(f"Error loading processed files: {e}")
+    return set()
+
+def save_processed_files(processed_files_set):
+    """Save list of files processed by ADF"""
+    try:
+        os.makedirs(os.path.dirname(ADF_PROCESSED_FILES), exist_ok=True)
+        with open(ADF_PROCESSED_FILES, 'w') as f:
+            json.dump({
+                'processed_files': list(processed_files_set),
+                'last_updated': datetime.now().isoformat()
+            }, f, indent=2)
+        print(f"Processed files state saved: {len(processed_files_set)} files")
+    except Exception as e:
+        print(f"Error saving processed files: {e}")
 
 def load_state():
     """Load last processed timestamp from state file"""
@@ -235,40 +266,112 @@ def load_to_azure(**context):
     return result
 
 def trigger_adf_pipeline(**context):
-    """Trigger Azure Data Factory pipeline to copy data to SQL Database"""
+    """Trigger Azure Data Factory pipeline to copy ALL unprocessed files to SQL Database"""
     print("=" * 50)
     print("STEP 4: TRIGGERING AZURE DATA FACTORY PIPELINE")
     print("=" * 50)
     
-    # Get processed file path from ADLS
-    processed_path = context['task_instance'].xcom_pull(key='processed_adls_path', task_ids='load_to_azure')
+    # Get the latest processed file path from this run
+    latest_processed_path = context['task_instance'].xcom_pull(key='processed_adls_path', task_ids='load_to_azure')
     
-    if not processed_path:
-        print("No processed data path found - skipping ADF trigger")
-        return {'status': 'skipped'}
+    # Load tracking state - which files have already been processed
+    already_processed = load_processed_files()
+    print(f"\nAlready processed files: {len(already_processed)}")
     
-    print(f"Triggering ADF to copy data from: {processed_path}")
-    
-    # Initialize Azure loader (for ADF client)
+    # Initialize Azure loader
     loader = AzureDataLoader()
     
-    # Trigger ADF pipeline
-    adf_result = loader.trigger_adf_pipeline(
-        pipeline_name="CopyProcessedDataToSQL",
-        source_file_path=processed_path
-    )
-    
-    print(f"\nADF Pipeline Result:")
-    print(f"  Run ID: {adf_result.get('run_id')}")
-    print(f"  Status: {adf_result.get('status')}")
-    print(f"  Duration: {adf_result.get('duration_ms')} ms")
-    
-    context['task_instance'].xcom_push(key='adf_run_id', value=adf_result.get('run_id'))
-    context['task_instance'].xcom_push(key='adf_status', value=adf_result.get('status'))
-    
-    print("=" * 50)
-    
-    return adf_result
+    # Get ALL parquet files from processed container
+    try:
+        from azure.storage.filedatalake import DataLakeServiceClient
+        
+        fs = loader.datalake_client.get_file_system_client(loader.processed_container)
+        paths = list(fs.get_paths(path="processed-data"))
+        parquet_files = [p for p in paths if (not p.is_directory and p.name.endswith('.parquet'))]
+        parquet_files.sort(key=lambda p: p.last_modified)  # Oldest first
+        
+        # Filter out already processed files
+        files_to_process = [pf for pf in parquet_files if os.path.basename(pf.name) not in already_processed]
+        
+        print(f"\nTotal parquet files in container: {len(parquet_files)}")
+        print(f"Already processed: {len(already_processed)}")
+        print(f"New files to process: {len(files_to_process)}")
+        
+        if files_to_process:
+            print("\nFiles to process:")
+            for pf in files_to_process:
+                file_name = os.path.basename(pf.name)
+                print(f"  - {file_name} (modified: {pf.last_modified})")
+        
+        if not files_to_process:
+            print("\nNo new files to process - all files already loaded to SQL")
+            return {'status': 'skipped', 'message': 'All files already processed'}
+        
+        # Process each file through ADF
+        results = []
+        successful = 0
+        failed = 0
+        newly_processed = set(already_processed)
+        
+        for pf in files_to_process:
+            file_name = os.path.basename(pf.name)
+            file_path = f"abfss://{loader.processed_container}@{loader.storage_account}.dfs.core.windows.net/{pf.name}"
+            
+            print(f"\n▶ Processing file: {file_name}")
+            
+            # Trigger ADF pipeline for this file
+            adf_result = loader.trigger_adf_pipeline(
+                pipeline_name="CopyProcessedDataToSQL",
+                source_file_path=file_path
+            )
+            
+            results.append({
+                'file': file_name,
+                'run_id': adf_result.get('run_id'),
+                'status': adf_result.get('status'),
+                'duration_ms': adf_result.get('duration_ms')
+            })
+            
+            if adf_result.get('status') == 'Succeeded':
+                successful += 1
+                newly_processed.add(file_name)
+                print(f"  ✓ Success: {file_name}")
+            else:
+                failed += 1
+                print(f"  ✗ Failed: {file_name} - {adf_result.get('message', 'Unknown error')}")
+        
+        # Save updated processed files list
+        save_processed_files(newly_processed)
+        
+        # Summary
+        print(f"\n{'=' * 50}")
+        print(f"ADF Pipeline Batch Results:")
+        print(f"  Total Files Processed: {len(files_to_process)}")
+        print(f"  Successful: {successful}")
+        print(f"  Failed: {failed}")
+        print(f"  Total Tracked: {len(newly_processed)}")
+        print(f"{'=' * 50}")
+        
+        # Store results in XCom
+        context['task_instance'].xcom_push(key='adf_results', value=results)
+        context['task_instance'].xcom_push(key='adf_status', value='Succeeded' if failed == 0 else 'Partial')
+        
+        return {
+            'status': 'Succeeded' if failed == 0 else 'Partial',
+            'total_files': len(files_to_process),
+            'successful': successful,
+            'failed': failed,
+            'results': results
+        }
+        
+    except Exception as e:
+        print(f"Error processing files: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'status': 'Error',
+            'message': str(e)
+        }
 
 def update_state(**context):
     """Update ETL state with latest processed timestamp"""
@@ -362,7 +465,7 @@ dag = DAG(
     'nyc_311_incremental_etl_azure',
     default_args=default_args,
     description='NYC 311 Incremental ETL with Azure Data Lake and ADF',
-    schedule=timedelta(minutes=15),  # Run every 15 minutes
+    schedule=timedelta(hours=1),  # Run every 1 hour
     catchup=False,
     max_active_runs=1,
     tags=['nyc311', 'etl', 'azure', 'incremental']
