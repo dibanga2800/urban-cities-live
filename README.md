@@ -115,7 +115,7 @@ AZURE_DATA_FACTORY_NAME=urban-cities-adf
 
 # ETL Configuration
 FORCE_FULL_LOAD=false          # Set to 'true' for initial full historical load
-HISTORICAL_DAYS_BACK=30        # Number of days to load when FORCE_FULL_LOAD=true
+HISTORICAL_DAYS_BACK=7         # Number of days to load when FORCE_FULL_LOAD=true
 ```
 
 ### Terraform Variables

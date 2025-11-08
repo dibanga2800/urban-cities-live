@@ -40,7 +40,7 @@ STATE_FILE = '/usr/local/airflow/include/data/etl_state.json'
 def load_state():
     """Load last processed timestamp from state file"""
     # Check for FULL_HISTORICAL_LOAD environment variable or DAG config
-    days_back = int(os.getenv('HISTORICAL_DAYS_BACK', '30'))
+    days_back = int(os.getenv('HISTORICAL_DAYS_BACK', '7'))
     force_full_load = os.getenv('FORCE_FULL_LOAD', 'false').lower() == 'true'
     
     try:
@@ -372,6 +372,13 @@ def trigger_adf_pipeline(**context):
             print(f"  Duration: {adf_result.get('duration_ms')} ms")
         print(f"{'=' * 50}")
         
+        # Check if pipeline succeeded
+        if adf_result.get('status') != 'Succeeded':
+            error_msg = f"ADF pipeline failed with status: {adf_result.get('status')}"
+            if adf_result.get('message'):
+                error_msg += f" - {adf_result.get('message')}"
+            raise RuntimeError(error_msg)
+        
         # Store results in XCom
         context['task_instance'].xcom_push(key='adf_result', value=adf_result)
         context['task_instance'].xcom_push(key='adf_status', value=adf_result.get('status'))
@@ -386,6 +393,43 @@ def trigger_adf_pipeline(**context):
             'status': 'Error',
             'message': str(e)
         }
+
+def validate_adf_exists(**context):
+    """Preflight check: ensure the expected ADF pipeline exists before triggering"""
+    print("=" * 50)
+    print("PREFLIGHT: VALIDATE ADF PIPELINE EXISTS")
+    print("=" * 50)
+
+    from azure.core.exceptions import HttpResponseError
+    from azure.mgmt.datafactory import DataFactoryManagementClient
+    
+    # Reuse loader configuration and credential
+    loader = AzureDataLoader()
+    pipeline_name = "CopyProcessedDataToSQL"
+    
+    try:
+        adf_client = DataFactoryManagementClient(
+            credential=loader.credential,
+            subscription_id=loader.subscription_id
+        )
+        # Will raise if missing
+        pipeline = adf_client.pipelines.get(
+            resource_group_name=loader.resource_group,
+            factory_name=loader.adf_name,
+            pipeline_name=pipeline_name
+        )
+        print(f"✓ ADF pipeline found: {pipeline_name}")
+        context['task_instance'].xcom_push(key='adf_pipeline_name', value=pipeline_name)
+    except HttpResponseError as hre:
+        msg = (
+            f"ADF pipeline '{pipeline_name}' not found in factory '{loader.adf_name}' "
+            f"(resource group '{loader.resource_group}'). Ensure post-deploy step created it."
+        )
+        print(msg)
+        raise RuntimeError(msg) from hre
+    except Exception as e:
+        print(f"Unexpected error checking ADF pipeline: {e}")
+        raise
 
 def update_state(**context):
     """Update ETL state with latest processed timestamp"""
@@ -518,6 +562,12 @@ trigger_adf = PythonOperator(
     dag=dag
 )
 
+validate_adf = PythonOperator(
+    task_id='validate_adf_exists',
+    python_callable=validate_adf_exists,
+    dag=dag
+)
+
 update_etl_state = PythonOperator(
     task_id='update_state',
     python_callable=update_state,
@@ -534,4 +584,4 @@ cleanup = PythonOperator(
 end = EmptyOperator(task_id='end', dag=dag, trigger_rule='all_done')
 
 # Define task dependencies
-start >> extract >> transform >> load_azure >> create_table >> trigger_adf >> update_etl_state >> cleanup >> end
+start >> extract >> transform >> load_azure >> create_table >> validate_adf >> trigger_adf >> update_etl_state >> cleanup >> end

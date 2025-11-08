@@ -119,6 +119,27 @@ while ($true) {
                 Write-Host ""
                 Write-Host "✓ Infrastructure applied successfully!" -ForegroundColor Green
                 Write-Host ""
+                # Post-apply: Create/Update ADF pipeline to prevent Airflow trigger errors
+                try {
+                    Write-Host "Creating/Updating ADF pipeline (post-apply step)..." -ForegroundColor Yellow
+                    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+                    $adfScript = Join-Path $repoRoot "scripts/adf/create_adf_pipeline.py"
+                    if (Test-Path $adfScript) {
+                        # Prefer python from PATH
+                        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+                        if (-not $pythonCmd) {
+                            Write-Host "Python not found in PATH. Attempting 'py' launcher..." -ForegroundColor Yellow
+                            py -3 $adfScript
+                        } else {
+                            python $adfScript
+                        }
+                        Write-Host "✓ ADF pipeline ensured (CopyProcessedDataToSQL)" -ForegroundColor Green
+                    } else {
+                        Write-Host "⚠ ADF creation script not found: $adfScript" -ForegroundColor Yellow
+                    }
+                } catch {
+                    Write-Host "✗ Failed to create ADF pipeline automatically. Run scripts/adf/create_adf_pipeline.py manually." -ForegroundColor Red
+                }
                 Write-Host "Run option 5 to see the outputs (connection strings, etc.)" -ForegroundColor Cyan
             } else {
                 Write-Host "Cancelled." -ForegroundColor Yellow

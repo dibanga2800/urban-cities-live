@@ -386,11 +386,11 @@ class AzureDataLoader:
             
         except Exception as e:
             logger.error(f"Error triggering ADF pipeline: {e}")
-            return {
-                'run_id': None,
-                'status': 'Error',
-                'message': str(e)
-            }
+            logger.error("ADF trigger failed BEFORE pipeline run completion. This is often due to one of: "
+                         "(1) Pipeline name mismatch, (2) Factory not deployed yet, (3) Auth/permissions issue. "
+                         "Verify Terraform apply + post-apply ADF creation step executed.")
+            # Raise exception to fail the Airflow task instead of returning error dict
+            raise RuntimeError(f"ADF pipeline trigger failed: {str(e)}") from e
     
     def load_complete_pipeline(self, 
                                raw_df: pd.DataFrame, 
