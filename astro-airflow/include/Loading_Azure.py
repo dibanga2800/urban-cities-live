@@ -117,6 +117,7 @@ class AzureDataLoader:
     def load_to_raw_container(self, df: pd.DataFrame, file_prefix: str = "nyc_311") -> Optional[str]:
         """
         Load raw extracted data to ADLS raw container
+        Appends new data to single master file instead of creating multiple timestamped files
         
         Args:
             df: DataFrame containing raw data
@@ -130,9 +131,8 @@ class AzureDataLoader:
             return None
         
         try:
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{file_prefix}_raw_{timestamp}.csv"
+            # Single master file path (no timestamp)
+            filename = f"{file_prefix}_raw.csv"
             file_path = f"raw-data/{filename}"
             
             # Get file system client
@@ -145,17 +145,43 @@ class AzureDataLoader:
             except Exception:
                 pass  # Directory may already exist
             
-            # Upload file
+            # Get file client
             file_client = file_system_client.get_file_client(file_path)
             
-            # Convert DataFrame to CSV
-            csv_data = df.to_csv(index=False)
+            # Check if file exists and read existing data
+            existing_df = pd.DataFrame()
+            try:
+                download = file_client.download_file()
+                existing_data = download.readall()
+                if existing_data:
+                    import io
+                    existing_df = pd.read_csv(io.BytesIO(existing_data))
+                    logger.info(f"Found existing file with {len(existing_df)} records")
+            except Exception as e:
+                logger.info(f"No existing file found, creating new one: {e}")
             
-            # Upload data
+            # Append new data to existing data
+            if not existing_df.empty:
+                # Remove duplicates based on unique_key
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+                if 'unique_key' in combined_df.columns:
+                    original_count = len(combined_df)
+                    combined_df = combined_df.drop_duplicates(subset=['unique_key'], keep='last')
+                    duplicates_removed = original_count - len(combined_df)
+                    if duplicates_removed > 0:
+                        logger.info(f"Removed {duplicates_removed} duplicate records")
+                df_to_upload = combined_df
+            else:
+                df_to_upload = df
+            
+            # Convert DataFrame to CSV
+            csv_data = df_to_upload.to_csv(index=False)
+            
+            # Upload data (overwrite with appended data)
             file_client.upload_data(csv_data, overwrite=True)
             
-            logger.info(f"Successfully uploaded {len(df)} records to raw container: {file_path}")
-            logger.info(f"File size: {len(csv_data)} bytes")
+            logger.info(f"Successfully appended {len(df)} new records to raw container: {file_path}")
+            logger.info(f"Total records in file: {len(df_to_upload)}, File size: {len(csv_data)} bytes")
             
             return f"abfss://{self.raw_container}@{self.storage_account}.dfs.core.windows.net/{file_path}"
             
@@ -166,6 +192,7 @@ class AzureDataLoader:
     def load_to_processed_container(self, df: pd.DataFrame, file_prefix: str = "nyc_311") -> Optional[str]:
         """
         Load transformed/processed data to ADLS processed container
+        Appends new data to single master Parquet file instead of creating multiple timestamped files
         Uses Parquet format for efficient storage and better compression
         
         Args:
@@ -180,9 +207,8 @@ class AzureDataLoader:
             return None
         
         try:
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{file_prefix}_processed_{timestamp}.parquet"
+            # Single master file path (no timestamp)
+            filename = f"{file_prefix}_processed.parquet"
             file_path = f"processed-data/{filename}"
             
             # Get file system client
@@ -195,8 +221,34 @@ class AzureDataLoader:
             except Exception:
                 pass  # Directory may already exist
             
-            # Upload file
+            # Get file client
             file_client = file_system_client.get_file_client(file_path)
+            
+            # Check if file exists and read existing data
+            existing_df = pd.DataFrame()
+            try:
+                download = file_client.download_file()
+                existing_data = download.readall()
+                if existing_data:
+                    import io
+                    existing_df = pd.read_parquet(io.BytesIO(existing_data))
+                    logger.info(f"Found existing file with {len(existing_df)} records")
+            except Exception as e:
+                logger.info(f"No existing file found, creating new one: {e}")
+            
+            # Append new data to existing data
+            if not existing_df.empty:
+                # Remove duplicates based on unique_key
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+                if 'unique_key' in combined_df.columns:
+                    original_count = len(combined_df)
+                    combined_df = combined_df.drop_duplicates(subset=['unique_key'], keep='last')
+                    duplicates_removed = original_count - len(combined_df)
+                    if duplicates_removed > 0:
+                        logger.info(f"Removed {duplicates_removed} duplicate records")
+                df_to_upload = combined_df
+            else:
+                df_to_upload = df
             
             # Convert DataFrame to Parquet format (in-memory)
             import io
@@ -208,17 +260,17 @@ class AzureDataLoader:
             # Ensure datetime-like columns are proper timestamps in Parquet (for ADF to map to SQL DateTime)
             datetime_cols = ['created_date', 'closed_date', 'processed_at']
             for col in datetime_cols:
-                if col in df.columns:
+                if col in df_to_upload.columns:
                     # Normalize known null tokens then convert
-                    df[col] = df[col].replace({'': None, 'NaT': None, 'None': None})
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                    df_to_upload[col] = df_to_upload[col].replace({'': None, 'NaT': None, 'None': None})
+                    df_to_upload[col] = pd.to_datetime(df_to_upload[col], errors='coerce')
 
             # Create PyArrow table letting Arrow infer proper types (timestamps, numerics, strings)
-            table = pa.Table.from_pandas(df, preserve_index=False)
+            table = pa.Table.from_pandas(df_to_upload, preserve_index=False)
             
             # Log for debugging
             for col in datetime_cols:
-                if col in df.columns:
+                if col in df_to_upload.columns:
                     try:
                         logger.info(f"{col} - Parquet type: {table.schema.field(col).type}, nulls: {table.column(col).null_count}")
                     except Exception:
@@ -233,11 +285,11 @@ class AzureDataLoader:
             )
             parquet_data = buffer.getvalue()
             
-            # Upload data
+            # Upload data (overwrite with appended data)
             file_client.upload_data(parquet_data, overwrite=True)
             
-            logger.info(f"Successfully uploaded {len(df)} records to processed container: {file_path}")
-            logger.info(f"File size: {len(parquet_data)} bytes (Parquet format)")
+            logger.info(f"Successfully appended {len(df)} new records to processed container: {file_path}")
+            logger.info(f"Total records in file: {len(df_to_upload)}, File size: {len(parquet_data)} bytes (Parquet format)")
             
             return f"abfss://{self.processed_container}@{self.storage_account}.dfs.core.windows.net/{file_path}"
             
@@ -251,28 +303,17 @@ class AzureDataLoader:
                             parameters: Optional[Dict] = None) -> Dict:
         """
         Trigger Azure Data Factory pipeline to copy processed data to SQL Database
+        Now works with single master file instead of multiple timestamped files
         
         Args:
             pipeline_name: Name of the ADF pipeline to trigger
-            source_file_path: Path to the source file in ADLS
+            source_file_path: Path to the source file in ADLS (optional, defaults to master file)
             parameters: Additional parameters to pass to the pipeline
             
         Returns:
             Dict with run_id and status
         """
         try:
-            # Helper to extract just the file name relative to processed-data folder
-            def _to_file_name(path: str) -> str:
-                if not path:
-                    return path
-                # Strip abfss URL and directory prefixes
-                for token in ["abfss://", f"{self.processed_container}@{self.storage_account}.dfs.core.windows.net/", f"{self.storage_account}.dfs.core.windows.net/", "https://", "http://"]:
-                    path = path.replace(token, "")
-                # Remove container and folder prefixes if present
-                path = path.replace(f"{self.processed_container}/", "")
-                path = path.replace("processed-data/", "")
-                return os.path.basename(path)
-
             # Initialize ADF Management Client
             adf_client = DataFactoryManagementClient(
                 credential=self.credential,
@@ -282,31 +323,13 @@ class AzureDataLoader:
             # Prepare pipeline parameters
             pipeline_params = parameters or {}
             
-            # Determine target file name: prefer explicit, else discover latest
-            file_name = None
-            if source_file_path:
-                file_name = _to_file_name(source_file_path)
-            if not file_name:
-                try:
-                    # Discover latest parquet in processed-data
-                    fs = self.datalake_client.get_file_system_client(self.processed_container)
-                    paths = list(fs.get_paths(path="processed-data"))
-                    parquet_files = [p for p in paths if (not p.is_directory and p.name.endswith('.parquet'))]
-                    parquet_files.sort(key=lambda p: p.last_modified, reverse=True)
-                    if parquet_files:
-                        file_name = os.path.basename(parquet_files[0].name)
-                        logger.info(f"Discovered latest Parquet: {file_name}")
-                except Exception as disc_err:
-                    logger.warning(f"Could not discover latest Parquet automatically: {disc_err}")
-
-            if file_name:
-                pipeline_params['fileName'] = file_name
-            else:
-                logger.warning("No Parquet file name provided or discovered; pipeline may not copy any file.")
-            
+            # Use fixed master file name instead of discovering latest
+            file_name = "nyc_311_processed.parquet"
+            pipeline_params['fileName'] = file_name
             pipeline_params['timestamp'] = datetime.now().isoformat()
             
             logger.info(f"Triggering ADF pipeline: {pipeline_name}")
+            logger.info(f"Target file: {file_name}")
             logger.info(f"Parameters: {pipeline_params}")
             
             # Create pipeline run
@@ -355,6 +378,7 @@ class AzureDataLoader:
             
             if final_run.status == 'Succeeded':
                 logger.info(f"ADF pipeline completed successfully: {run_id}")
+                logger.info(f"Master file '{file_name}' synchronized to SQL Database")
             else:
                 logger.error(f"ADF pipeline failed with status: {final_run.status}")
             

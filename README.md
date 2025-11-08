@@ -1,567 +1,240 @@
-# 🌆 Urban Cities Live Service
+# NYC 311 Service Requests ETL Pipeline
 
-> Real-time 311 service request analytics platform powered by Azure, Airflow, and Terraform
+A production data pipeline that extracts NYC 311 service request data, transforms it with quality checks, and loads it into Azure SQL Database for analytics.
 
-[![Infrastructure](https://img.shields.io/badge/Infrastructure-Azure-0078D4?style=flat&logo=microsoft-azure)](https://azure.microsoft.com)
-[![Orchestration](https://img.shields.io/badge/Orchestration-Airflow%202.10-017CEE?style=flat&logo=apache-airflow)](https://airflow.apache.org)
-[![IaC](https://img.shields.io/badge/IaC-Terraform-7B42BC?style=flat&logo=terraform)](https://terraform.io)
-[![Automation](https://img.shields.io/badge/Automation-100%25-success?style=flat)]()
+## Features
 
-## 📋 Table of Contents
+- **Incremental Loading**: Processes only new records since last successful run
+- **Automatic Deduplication**: Single master files with built-in duplicate removal
+- **Data Quality Scoring**: Every record scored 0-100 based on completeness
+- **Automated Schedule**: Runs hourly via Apache Airflow
+- **Infrastructure as Code**: Complete Azure deployment via Terraform
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Documentation](#documentation)
-- [Features](#features)
-- [Technology Stack](#technology-stack)
-- [Project Structure](#project-structure)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-
----
-
-## 🎯 Overview
-
-The **Urban Cities Live Service** is an end-to-end data engineering platform that:
-
-1. **Extracts** NYC 311 service request data from the [NYC Open Data API](https://data.cityofnewyork.us/resource/erm2-nwe9.json)
-2. **Transforms** raw data with quality scoring and enrichment
-3. **Loads** processed data into Azure Data Lake Storage (ADLS) Gen2
-4. **Orchestrates** automated pipelines with Apache Airflow
-5. **Stores** analytics-ready data in Azure SQL Database
-6. **Deploys** entire infrastructure with a single Terraform command
-
-### Key Achievements ✅
-
-- **100% Infrastructure Automation**: Zero-touch deployment via Terraform
-- **21-Minute Deployment**: From nothing to fully operational platform
-- **Astronomer Airflow**: Production-grade orchestration with Astro Runtime 3.1-3
-- **Incremental ETL**: Stateful processing with automatic resume capability
-- **Cloud-Native**: Built on Azure with best practices
-
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        NYC 311 API                              │
-│              https://data.cityofnewyork.us                      │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    ASTRONOMER AIRFLOW                           │
-│                  (Astro Runtime 3.1-3)                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │  Extract    │→ │  Transform   │→ │  Load to Azure        │  │
-│  │  NYC Data   │  │  & Quality   │  │  (ADLS Gen2)          │  │
-│  └─────────────┘  └──────────────┘  └───────────────────────┘  │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  AZURE DATA LAKE STORAGE GEN2                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │  raw/        │  │  processed/  │  │  curated/            │  │
-│  │  (Raw CSV)   │  │  (Cleaned)   │  │  (Aggregated)        │  │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘  │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   AZURE DATA FACTORY                            │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Pipeline: CopyProcessedDataToSQL                        │   │
-│  │  Trigger: On-demand from Airflow                         │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   AZURE SQL DATABASE                            │
-│                    urban_cities_db                              │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Table: nyc_311_requests                                 │   │
-│  │  Columns: 27 (schema-matched to API)                     │   │
-│  │  Indexes: 6 (optimized for analytics)                    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+NYC 311 API → Airflow ETL → Azure Data Lake Gen2 → Azure Data Factory → Azure SQL Database
 ```
 
-### Infrastructure Management
+**Data Flow:**
+1. **Extract**: Incremental pull from NYC 311 API using SoQL queries
+2. **Transform**: Data cleaning, quality scoring, feature engineering
+3. **Load to ADLS**: Append to master files (nyc_311_raw.csv, nyc_311_processed.parquet)
+4. **Copy to SQL**: ADF pipeline truncates and reloads SQL table
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         TERRAFORM                               │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  • Resource Group                                        │   │
-│  │  • Storage Account (ADLS Gen2)                           │   │
-│  │  • Data Factory                                          │   │
-│  │  • SQL Server & Database                                 │   │
-│  │  • Firewall Rules (Auto IP Detection)                    │   │
-│  │  • Role Assignments (ADF → Storage, SP → ADF)            │   │
-│  │  • SQL Table Schema (Provisioner)                        │   │
-│  │  • ADF Pipeline (Provisioner)                            │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  Command: terraform apply -auto-approve                         │
-│  Duration: ~21 minutes                                          │
-│  Resources: 14 created                                          │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Technology Stack
 
----
+- **Orchestration**: Apache Airflow (Astronomer Astro Runtime 3.1-3)
+- **Cloud**: Azure Data Lake Gen2, Azure Data Factory, Azure SQL Database
+- **Infrastructure**: Terraform
+- **Languages**: Python 3.12, SQL
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
-- **Terraform**: 1.5+ ([Installation Guide](https://developer.hashicorp.com/terraform/install))
-- **Azure CLI**: Latest ([Installation Guide](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli))
-- **Astronomer Astro CLI**: 1.38+ ([Installation Guide](https://docs.astronomer.io/astro/cli/install-cli))
-- **Python**: 3.11+ ([Download](https://python.org))
-- **Podman**: 5.6+ (for Astro containers)
+- Azure CLI and active subscription
+- Terraform 1.5+
+- Astronomer Astro CLI 1.38+
+- Python 3.11+
 
-### One-Command Deployment
+### Deploy Infrastructure
 
 ```powershell
-# 1. Clone the repository
-git clone <repository-url>
+# 1. Clone and navigate
+git clone <repo-url>
 cd Urban_Cities_live_Service
 
-# 2. Authenticate with Azure
+# 2. Login to Azure
 az login
 
-# 3. Deploy infrastructure (21 minutes)
+# 3. Configure Terraform variables
 cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your values
+
+# 4. Deploy Azure resources
 terraform init
 terraform apply -auto-approve
 
-# 4. Create ADF pipeline
-cd ..\notebook
+# 5. Create ADF pipeline
+cd ..\scripts\adf
 python create_adf_pipeline.py
 
-# 5. Start Airflow
-cd ..\astro-airflow
+# 6. Start Airflow
+cd ..\..\astro-airflow
 astro dev start
 
-# 6. Access Airflow UI
-# Navigate to: http://localhost:8080
-# Login: admin / admin
-# Trigger DAG: nyc_311_incremental_etl_azure
+# 7. Access Airflow UI at http://localhost:8080
 ```
 
-**That's it!** Your entire platform is now operational.
-
----
-
-## 📚 Documentation
-
-### Core Documentation
-
-| Document | Description | Location |
-|----------|-------------|----------|
-| **[AUTOMATION_SUMMARY.md](./AUTOMATION_SUMMARY.md)** | 100% automation achievement report | Root |
-| **[Terraform Automation Guide](./terraform/AUTOMATION_GUIDE.md)** | Complete IaC deployment guide (6,500+ words) | `terraform/` |
-| **[Airflow README](./astro-airflow/README.md)** | Astro setup and DAG documentation | `astro-airflow/` |
-| **[Migration Notes](./astro-airflow/MIGRATION_NOTES.md)** | Docker Compose → Astro migration details | `astro-airflow/` |
-| **[Quick Start Guide](./astro-airflow/QUICK_START.md)** | Fast setup for experienced users | `astro-airflow/` |
-
-### Additional Resources
-
-- **[Terraform README](./terraform/README.md)**: Infrastructure overview
-- **[Production Checklist](./terraform/PRODUCTION_CHECKLIST.md)**: Pre-production validation
-- **[Notebook Scripts](./notebook/README.md)**: Standalone Python utilities
-- **[Azure Setup Guides](./notebook/)**: Azure authentication, ETL setup, Airflow deployment
-
----
-
-## ✨ Features
-
-### 🔄 ETL Pipeline
-
-- **Incremental Processing**: Stateful ETL with `etl_state.json` tracking
-- **Data Quality Scoring**: Automated validation and quality metrics
-- **Error Handling**: Graceful failures with retry logic
-- **Notification System**: Task completion alerts and error reporting
-
-### ☁️ Cloud Infrastructure
-
-- **Azure Data Lake Storage Gen2**: Hierarchical namespace, 3 containers (raw/processed/curated)
-- **Azure Data Factory**: Managed pipeline for ADLS → SQL transfers
-- **Azure SQL Database**: Basic tier, 2GB, optimized schema with 6 indexes
-- **Automatic Firewall Rules**: IP detection and Azure service allowlist
-
-### 🎯 Automation
-
-- **Infrastructure as Code**: 100% Terraform-managed
-- **Zero-Touch Deployment**: Single command creates entire platform
-- **Automatic IP Detection**: Dynamic firewall configuration via HTTP provider
-- **Role-Based Access**: Service Principal with least-privilege permissions
-- **Graceful Provisioners**: Continue on failure, manual override available
-
-### 🛡️ Security
-
-- **Service Principal Authentication**: Azure AD integration
-- **Sensitive Data Protection**: Credentials marked sensitive in Terraform
-- **Firewall Restrictions**: IP-based access control
-- **Managed Identities**: ADF uses system-assigned identity for Storage
-
-### 📊 Monitoring & Observability
-
-- **Airflow Web UI**: Task execution monitoring at http://localhost:8080
-- **Terraform Outputs**: All connection strings and endpoints
-- **Health Check Scripts**: `check_table.py`, `verify_azure_files.py`
-- **Azure Portal**: Native monitoring for all resources
-
----
-
-## 🛠️ Technology Stack
-
-### Orchestration
-- **Apache Airflow**: 2.10+ (via Astronomer Astro Runtime 3.1-3)
-- **Podman**: 5.6.2 (container runtime)
-
-### Cloud Platform
-- **Azure Resource Group**: Logical container for all resources
-- **Azure Data Lake Storage Gen2**: Hierarchical data lake
-- **Azure Data Factory**: Data integration service
-- **Azure SQL Database**: Relational database (Basic tier)
-
-### Infrastructure as Code
-- **Terraform**: 1.5+ with providers:
-  - `azurerm` ~> 3.0
-  - `null` ~> 3.0
-  - `http` ~> 3.0
-
-### Programming Languages
-- **Python**: 3.11+ (Airflow tasks, ETL scripts)
-- **HCL**: Terraform configuration
-- **PowerShell**: Windows automation scripts
-
-### Python Libraries
-```
-apache-airflow==2.10+
-pandas==2.2+
-requests==2.32+
-pyodbc==5.1+
-azure-storage-file-datalake==12.15+
-azure-identity==1.16+
-azure-mgmt-datafactory==7.1+
-python-dotenv==1.0+
-```
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 Urban_Cities_live_Service/
-│
-├── astro-airflow/                    # Airflow project (Astronomer Astro)
-│   ├── dags/                         # DAG definitions
+├── astro-airflow/           # Airflow DAGs and configuration
+│   ├── dags/
 │   │   └── nyc_311_incremental_etl_azure.py
-│   ├── include/                      # ETL modules
-│   │   ├── Extraction.py
-│   │   ├── Transformation.py
-│   │   ├── Loading_Azure.py
-│   │   └── data/
-│   │       └── etl_state.json        # State tracking
-│   ├── .env                          # Environment variables
-│   ├── Dockerfile                    # Astro runtime config
-│   ├── packages.txt                  # System packages
-│   ├── requirements.txt              # Python dependencies
-│   ├── README.md                     # Airflow documentation
-│   ├── MIGRATION_NOTES.md            # Migration details
-│   └── QUICK_START.md                # Quick reference
-│
-├── terraform/                        # Infrastructure as Code
-│   ├── main.tf                       # Resource definitions (14 resources)
-│   ├── variables.tf                  # Variable declarations
-│   ├── terraform.tfvars              # Variable values (sensitive)
-│   ├── outputs.tf                    # Output definitions
-│   ├── terraform.tfstate             # State file (local)
-│   ├── AUTOMATION_GUIDE.md           # Complete automation guide
-│   ├── README.md                     # Infrastructure overview
-│   └── PRODUCTION_CHECKLIST.md       # Pre-production validation
-│
-├── notebook/                         # Standalone Python scripts
-│   ├── create_sql_table.py           # SQL schema creation
-│   ├── create_adf_pipeline.py        # ADF pipeline setup
-│   ├── check_table.py                # Database verification
-│   ├── test_azure_connection.py      # Connectivity tests
-│   ├── .env                          # Environment variables
-│   └── [various documentation].md
-│
-├── AUTOMATION_SUMMARY.md             # 100% automation achievement report
-└── README.md                         # This file
+│   └── include/
+│       ├── Extraction.py
+│       ├── Transformation.py
+│       └── Loading_Azure.py
+├── terraform/               # Infrastructure as Code
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+├── scripts/                 # Utility scripts
+│   ├── adf/create_adf_pipeline.py
+│   └── sql/create_sql_table.py
+└── docs/                    # Documentation
 ```
 
----
+## Configuration
 
-## 🚢 Deployment
+### Environment Variables
 
-### Full Deployment Process
+Create a `.env` file in the `astro-airflow` directory:
 
-#### Step 1: Infrastructure Deployment
-```powershell
-cd terraform
-terraform init
-terraform apply -auto-approve
+```env
+# Azure Storage
+AZURE_STORAGE_ACCOUNT_NAME=your_storage_account
+AZURE_TENANT_ID=your_tenant_id
+AZURE_CLIENT_ID=your_client_id
+AZURE_CLIENT_SECRET=your_client_secret
+
+# Azure SQL
+AZURE_SQL_SERVER=your_server.database.windows.net
+AZURE_SQL_DATABASE=urban_cities_db
+AZURE_SQL_USERNAME=sqladmin
+AZURE_SQL_PASSWORD=your_password
+
+# Azure Data Factory
+AZURE_SUBSCRIPTION_ID=your_subscription_id
+AZURE_RESOURCE_GROUP=urban-cities-rg
+AZURE_DATA_FACTORY_NAME=urban-cities-adf
 ```
-**Duration**: ~21 minutes  
-**Creates**: 14 Azure resources
 
-#### Step 2: ADF Pipeline Creation
-```powershell
-cd ..\notebook
-python create_adf_pipeline.py
+### Terraform Variables
+
+Required variables in `terraform.tfvars`:
+
+```hcl
+resource_group_name  = "urban-cities-rg"
+location             = "eastus"
+storage_account_name = "urbancitiesadls2025"
+sql_admin_password   = "YourSecurePassword123!"
 ```
-**Duration**: ~10 seconds  
-**Creates**: Linked services, datasets, pipeline
 
-#### Step 3: Verify SQL Table
-```powershell
-python check_table.py
+## DAG Details
+
+**Name**: `nyc_311_incremental_etl_azure`  
+**Schedule**: `0 * * * *` (hourly)  
+**Tasks**:
+1. `extract_nyc_311_data` - Pull new records from API
+2. `transform_data` - Clean and enrich data
+3. `load_to_raw` - Upload raw CSV to ADLS
+4. `load_to_processed` - Upload processed Parquet to ADLS
+5. `trigger_adf_pipeline` - Copy data to SQL via ADF
+
+## Data Schema
+
+**SQL Table**: `nyc_311_requests` (20 columns)
+
+Key columns:
+- `unique_key` - Primary key (hash of request details)
+- `created_date` - Request timestamp
+- `agency`, `complaint_type`, `descriptor` - Request classification
+- `borough`, `latitude`, `longitude` - Location
+- `status`, `closed_date` - Resolution tracking
+- `resolution_time_hours` - Derived metric
+- `data_quality_score` - Completeness score (0-100)
+
+## Monitoring
+
+### Check Airflow DAG Status
+```bash
+# View recent DAG runs
+astro dev run dags list-runs -d nyc_311_incremental_etl_azure
+
+# Check task logs
+astro dev logs
 ```
-**Expected**: 1 table (nyc_311_requests), 0 rows
 
-#### Step 4: Start Airflow
-```powershell
-cd ..\astro-airflow
+### Query SQL Data
+```sql
+-- Total requests
+SELECT COUNT(*) FROM nyc_311_requests;
+
+-- Recent requests
+SELECT TOP 10 * FROM nyc_311_requests 
+ORDER BY created_date DESC;
+
+-- Average quality score
+SELECT AVG(data_quality_score) as avg_quality 
+FROM nyc_311_requests;
+```
+
+### Check ADLS Files
+```bash
+# Using Azure CLI
+az storage blob list \
+  --account-name urbancitiesadls2025 \
+  --container-name processed \
+  --output table
+```
+
+## Troubleshooting
+
+### Airflow Container Issues
+```bash
+# Restart Airflow
+astro dev restart
+
+# View logs
+astro dev logs -f
+
+# Reset environment
+astro dev kill
 astro dev start
 ```
-**Duration**: ~2 minutes  
-**Opens**: http://localhost:8080 (admin/admin)
 
-#### Step 5: Run ETL Pipeline
-1. Navigate to http://localhost:8080
-2. Find DAG: `nyc_311_incremental_etl_azure`
-3. Toggle "Unpause"
-4. Click "Trigger DAG"
+### Azure Authentication Errors
+```bash
+# Verify Service Principal
+az login --service-principal \
+  -u $AZURE_CLIENT_ID \
+  -p $AZURE_CLIENT_SECRET \
+  --tenant $AZURE_TENANT_ID
 
-#### Step 6: Monitor Execution
-Watch the 9 tasks execute:
-1. ✅ start
-2. ✅ extract_data (NYC 311 API)
-3. ✅ transform_data (quality scoring)
-4. ✅ load_to_azure (ADLS)
-5. ✅ trigger_adf_pipeline (SQL load)
-6. ✅ update_state
-7. ✅ cleanup_temp_files
-8. ✅ send_notification
-9. ✅ end
-
-#### Step 7: Verify Data
-```powershell
-# Check SQL
-cd ..\notebook
-python check_table.py  # Should show 42000+ rows
-
-# Check ADLS
-az storage fs file list --account-name urbancitiesadls2025 --file-system processed --auth-mode login
+# Check permissions
+az role assignment list --assignee $AZURE_CLIENT_ID
 ```
 
-### Destroy Infrastructure
-```powershell
-cd terraform
-terraform destroy -auto-approve
-```
-**Duration**: ~2 minutes  
-**Removes**: All 13 resources (provisioners excluded)
+### SQL Connection Issues
+- Ensure firewall rules allow your IP
+- Verify credentials in `.env` file
+- Check SQL server status in Azure Portal
 
----
+## Production Deployment
 
-## 🐛 Troubleshooting
+See `docs/PRODUCTION_BUILD.md` for detailed production deployment guide including:
+- Security hardening
+- Monitoring setup
+- Backup configuration
+- Scaling considerations
 
-### Common Issues
+## Contributing
 
-#### Issue: SQL Server Creation Takes Too Long
-**Symptom**: Terraform hangs at "azurerm_mssql_server.main: Creating..."
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
-**Solution**: This is normal. Azure SQL Server takes 15-20 minutes. **Do not interrupt.**
+## License
 
----
+[Your License Here]
 
-#### Issue: Port 5432 Already in Use
-**Symptom**: `astro dev start` fails with port conflict
+## Contact
 
-**Solution**: Run the port fix script:
-```powershell
-cd astro-airflow
-.\fix_port_and_start.ps1
-```
-This will stop PostgreSQL and free port 5432.
-
----
-
-#### Issue: ADF Pipeline Creation Fails
-**Symptom**: `AuthorizationFailed` error
-
-**Solution**: Check Service Principal role assignment:
-```powershell
-cd terraform
-terraform refresh
-terraform apply -auto-approve
-```
-Wait 5-10 minutes for role propagation.
-
----
-
-#### Issue: Airflow DAG Import Errors
-**Symptom**: DAG shows import errors in Airflow UI
-
-**Solution**: Check imports use `include/` prefix:
-```python
-from include.Extraction import DataExtractor
-from include.Transformation import DataTransformer
-from include.Loading_Azure import AzureDataLoader
-```
-
----
-
-#### Issue: Firewall Blocks SQL Connection
-**Symptom**: `pyodbc.OperationalError` when connecting to SQL
-
-**Solution**: Verify your IP is in firewall rules:
-```powershell
-# Check current IP
-curl https://api.ipify.org
-
-# Terraform will auto-detect and add it
-cd terraform
-terraform apply -auto-approve
-```
-
----
-
-### Health Checks
-
-```powershell
-# Infrastructure status
-cd terraform
-terraform plan  # Should show: No changes
-
-# Airflow status
-cd ..\astro-airflow
-astro dev ps  # All containers: Up
-
-# Azure resources
-az resource list --resource-group urban-cities-rg --output table
-
-# Database status
-cd ..\notebook
-python check_table.py
-```
-
----
-
-## 🤝 Contributing
-
-### Development Workflow
-
-1. **Create Feature Branch**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-2. **Make Changes**
-   - Update Terraform configs
-   - Modify Airflow DAGs
-   - Enhance ETL scripts
-
-3. **Test Locally**
-   ```powershell
-   terraform plan
-   astro dev restart
-   ```
-
-4. **Document Changes**
-   - Update relevant markdown files
-   - Add comments to code
-
-5. **Submit Pull Request**
-   - Describe changes
-   - Include testing results
-   - Reference related issues
-
-### Code Standards
-
-- **Python**: Follow PEP 8
-- **Terraform**: Use `terraform fmt`
-- **Airflow**: Follow Airflow best practices
-- **Documentation**: Keep markdown files updated
-
----
-
-## 📊 Project Statistics
-
-- **Total Lines of Code**: ~5,000+
-- **Terraform Resources**: 14
-- **Airflow Tasks**: 9
-- **Python Modules**: 6
-- **Documentation Pages**: 15+
-- **Automation Level**: 100%
-- **Deployment Time**: 21 minutes
-- **Average ETL Runtime**: 3-5 minutes
-
----
-
-## 🏆 Achievements
-
-- ✅ **100% Infrastructure Automation**
-- ✅ **Zero Manual Steps Required**
-- ✅ **Complete End-to-End Testing**
-- ✅ **Comprehensive Documentation**
-- ✅ **Production-Ready Orchestration**
-- ✅ **Cloud-Native Architecture**
-- ✅ **Incremental ETL with State Management**
-- ✅ **Automatic Firewall Configuration**
-- ✅ **Role-Based Access Control**
-- ✅ **Graceful Error Handling**
-
----
-
-## 📝 License
-
-This project is developed for educational and demonstration purposes.
-
----
-
-## 📞 Support
-
-For questions, issues, or enhancements:
-
-1. Check the [Documentation](#documentation)
-2. Review [Troubleshooting](#troubleshooting)
-3. Examine Terraform outputs and Airflow logs
-4. Consult Azure Portal for resource status
-
----
-
-## 🙏 Acknowledgments
-
-- **NYC Open Data**: For providing the 311 service request API
-- **Astronomer**: For the excellent Astro CLI and managed Airflow
-- **HashiCorp**: For Terraform and infrastructure automation tools
-- **Microsoft Azure**: For comprehensive cloud platform
-- **Apache Airflow**: For powerful workflow orchestration
-
----
-
-**Last Updated**: November 5, 2025  
-**Version**: 2.0 (Astronomer Astro + Full Automation)  
-**Status**: ✅ Production Ready (Development Environment)
-
----
-
-<div align="center">
-
-**Made with ❤️ for Data Engineering**
-
-[Documentation](./terraform/AUTOMATION_GUIDE.md) • [Quick Start](./astro-airflow/QUICK_START.md) • [Automation Summary](./AUTOMATION_SUMMARY.md)
-
-</div>
+[Your Contact Information]

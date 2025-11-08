@@ -58,6 +58,7 @@ class DataTransformer:
         df_clean = self._handle_missing_values(df_clean)
         df_clean = self._validate_data_quality(df_clean)
         df_clean = self._format_datetime_for_sql(df_clean)
+        df_clean = self._reorder_columns(df_clean)  # Ensure column order matches SQL table
         
         logger.info(f"Transformation completed: {len(df_clean)} records")
         return df_clean
@@ -152,7 +153,11 @@ class DataTransformer:
             df['created_hour'] = df['created_date'].dt.hour
             df['created_weekday'] = df['created_date'].dt.day_name()
         
-        # Resolution time calculation
+        # Ensure closed_date column exists (even if all null)
+        if 'closed_date' not in df.columns:
+            df['closed_date'] = pd.NaT
+        
+        # Resolution time calculation - ALWAYS create the column (even if all NaN)
         if 'created_date' in df.columns and 'closed_date' in df.columns:
             df['resolution_hours'] = (
                 df['closed_date'] - df['created_date']
@@ -163,10 +168,11 @@ class DataTransformer:
             if negative_mask.sum() > 0:
                 logger.info(f"Found {negative_mask.sum()} records with negative resolution time")
                 df.loc[negative_mask, 'resolution_hours'] = np.nan
+        else:
+            # If columns don't exist, create resolution_hours as null
+            df['resolution_hours'] = np.nan
         
         # Status flags
-        if 'closed_date' not in df.columns:
-            df['closed_date'] = np.nan
         df['is_closed'] = df['closed_date'].notna()
         df['has_location'] = df['latitude'].notna() & df['longitude'].notna()
         
@@ -288,6 +294,45 @@ class DataTransformer:
                 logger.info(f"After formatting {col}: dtype={df[col].dtype}, non-null={df[col].notna().sum()}, sample={df[col].iloc[0] if len(df) > 0 else 'N/A'}")
         
         return df
+    
+    def _reorder_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Reorder columns to match SQL table schema exactly.
+        This ensures consistent column mapping during ADF copy.
+        """
+        logger.info("Reordering columns to match SQL schema")
+        
+        # Define exact column order matching SQL table
+        column_order = [
+            'unique_key',
+            'created_date',
+            'closed_date',
+            'agency',
+            'complaint_type',
+            'descriptor',
+            'borough',
+            'status',
+            'latitude',
+            'longitude',
+            'created_year',
+            'created_month',
+            'created_day',
+            'created_hour',
+            'created_weekday',
+            'resolution_hours',
+            'is_closed',
+            'has_location',
+            'processed_at',
+            'data_quality_score'
+        ]
+        
+        # Select only columns that exist, in the specified order
+        available_columns = [col for col in column_order if col in df.columns]
+        df_reordered = df[available_columns]
+        
+        logger.info(f"Columns reordered: {len(available_columns)} columns")
+        
+        return df_reordered
     
     def get_transformation_summary(self, df_original: pd.DataFrame, df_transformed: pd.DataFrame) -> dict:
         """

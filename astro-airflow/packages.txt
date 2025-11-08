@@ -1,0 +1,5 @@
+# System-level packages required for Python dependencies
+# These are installed as Debian/Ubuntu packages before Python packages
+
+# Required for pyodbc to connect to SQL Server
+unixodbc-dev

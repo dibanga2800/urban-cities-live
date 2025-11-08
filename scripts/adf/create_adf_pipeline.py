@@ -32,8 +32,9 @@ from azure.mgmt.datafactory.models import (
 )
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from Airflow .env file
+env_path = os.path.join(os.path.dirname(__file__), '..', '..', 'astro-airflow', '.env')
+load_dotenv(env_path)
 
 def create_adf_pipeline():
     """Create ADF pipeline with linked services, datasets, and copy activity"""
@@ -180,14 +181,13 @@ def create_adf_pipeline():
             )
         )
 
-        # Define SQL sink - Use UPSERT logic to handle duplicates
-        # Changed from TRUNCATE to avoid data loss when processing multiple files
+        # Define SQL sink - Use TRUNCATE mode since Python handles deduplication
+        # Single master file approach: truncate and reload entire dataset each time
         sql_sink = SqlSink(
-            write_behavior="upsert",
-            upsert_settings={
-                "useTempDB": True,
-                "keys": ["unique_key"]  # Use unique_key as the merge key
-            }
+            write_behavior="insert",
+            sql_writer_stored_procedure_name=None,
+            sql_writer_table_type=None,
+            pre_copy_script="TRUNCATE TABLE nyc_311_requests"  # Clear table before insert
         )
 
         # Build Copy Activity
@@ -217,7 +217,7 @@ def create_adf_pipeline():
         )
 
         print("   ✓ Copy Activity pipeline created/updated successfully: CopyProcessedDataToSQL")
-        print("   ✓ Using UPSERT mode to prevent duplicates and preserve existing data")
+        print("   ✓ Using TRUNCATE mode - single master file contains all deduplicated data")
 
     except Exception as e:
         print(f"   ✗ Error creating Copy Activity pipeline: {e}")

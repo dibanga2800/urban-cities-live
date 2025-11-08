@@ -42,27 +42,20 @@ def create_sql_table():
     IF OBJECT_ID('dbo.nyc_311_requests', 'U') IS NOT NULL
         DROP TABLE dbo.nyc_311_requests;
     
-    -- Create the table
+    -- Create the table matching the actual transformed data columns
     CREATE TABLE dbo.nyc_311_requests (
         unique_key VARCHAR(50) PRIMARY KEY,
         created_date DATETIME NOT NULL,
         closed_date DATETIME,
         agency VARCHAR(50),
-        agency_name VARCHAR(200),
         complaint_type VARCHAR(100),
         descriptor VARCHAR(200),
-        location_type VARCHAR(100),
-        incident_zip VARCHAR(10),
-        incident_address VARCHAR(500),
-        street_name VARCHAR(200),
-        city VARCHAR(100),
         borough VARCHAR(50),
+        status VARCHAR(50),
         latitude FLOAT,
         longitude FLOAT,
-        location VARCHAR(100),
-        status VARCHAR(50),
         
-        -- Derived columns from transformation (matching Transformation.py output)
+        -- Derived columns from transformation
         created_year INT,
         created_month INT,
         created_day INT,
@@ -82,6 +75,7 @@ def create_sql_table():
     CREATE INDEX idx_borough ON dbo.nyc_311_requests(borough);
     CREATE INDEX idx_status ON dbo.nyc_311_requests(status);
     CREATE INDEX idx_created_year_month ON dbo.nyc_311_requests(created_year, created_month);
+    CREATE INDEX idx_is_closed ON dbo.nyc_311_requests(is_closed);
     """
     
     try:
