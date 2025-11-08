@@ -52,3 +52,8 @@ notebook/data/parquet/*
 # OS
 .DS_Store
 Thumbs.db
+
+
+#Verify SQL files
+*.verify_sql_table.py
+*.verify_sql_data.py
