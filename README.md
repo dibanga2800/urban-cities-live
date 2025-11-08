@@ -13,7 +13,45 @@ A production data pipeline that extracts NYC 311 service request data, transform
 ## Architecture
 
 ```
-NYC 311 API → Airflow ETL → Azure Data Lake Gen2 → Azure Data Factory → Azure SQL Database
+┌─────────────────┐
+│  NYC 311 API    │
+│  (Public Data)  │
+└────────┬────────┘
+         │ HTTP GET (SoQL)
+         ↓
+┌─────────────────────────────────┐
+│   Apache Airflow (Astro)        │
+│  ┌──────────┐  ┌──────────┐    │
+│  │ Extract  │→ │Transform │    │
+│  └──────────┘  └────┬─────┘    │
+└─────────────────────┼───────────┘
+                      │
+         ┌────────────┴────────────┐
+         ↓                         ↓
+┌──────────────────┐      ┌───────────────┐
+│ Raw CSV Upload   │      │ Processed     │
+│ (nyc_311_raw.csv)│      │ Parquet Upload│
+└────────┬─────────┘      └───────┬───────┘
+         │                        │
+         ↓                        ↓
+┌─────────────────────────────────────┐
+│   Azure Data Lake Storage Gen2      │
+│   ┌─────────┐      ┌──────────┐   │
+│   │  raw/   │      │processed/│   │
+│   └─────────┘      └────┬─────┘   │
+└──────────────────────────┼──────────┘
+                           │
+                           ↓
+              ┌────────────────────────┐
+              │ Azure Data Factory     │
+              │ (Copy Pipeline)        │
+              └────────┬───────────────┘
+                       │
+                       ↓
+              ┌────────────────────────┐
+              │ Azure SQL Database     │
+              │ (nyc_311_requests)     │
+              └────────────────────────┘
 ```
 
 **Data Flow:**
