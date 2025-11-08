@@ -5,7 +5,7 @@ conn = pyodbc.connect(
     'SERVER=urban-cities-sql-srv-2025x.database.windows.net;'
     'DATABASE=urban_cities_db;'
     'UID=sqladmin;'
-    'PWD=D030avbang@@'
+    'PWD=your-password'
 )
 cursor = conn.cursor()
 
