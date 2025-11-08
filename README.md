@@ -112,6 +112,10 @@ AZURE_SQL_PASSWORD=your_password
 AZURE_SUBSCRIPTION_ID=your_subscription_id
 AZURE_RESOURCE_GROUP=urban-cities-rg
 AZURE_DATA_FACTORY_NAME=urban-cities-adf
+
+# ETL Configuration
+FORCE_FULL_LOAD=false          # Set to 'true' for initial full historical load
+HISTORICAL_DAYS_BACK=30        # Number of days to load when FORCE_FULL_LOAD=true
 ```
 
 ### Terraform Variables
@@ -134,7 +138,11 @@ sql_admin_password   = "YourSecurePassword123!"
 2. `transform_data` - Clean and enrich data
 3. `load_to_raw` - Upload raw CSV to ADLS
 4. `load_to_processed` - Upload processed Parquet to ADLS
-5. `trigger_adf_pipeline` - Copy data to SQL via ADF
+5. `create_sql_table` - Create SQL table if not exists (automated)
+6. `trigger_adf_pipeline` - Copy data to SQL via ADF
+7. `update_etl_state` - Update timestamp for incremental loads
+
+**Initial Setup**: For first deployment, set `FORCE_FULL_LOAD=true` in `.env` to load historical data (default 30 days). After initial load, set to `false` for incremental hourly updates.
 
 ## Data Schema
 
