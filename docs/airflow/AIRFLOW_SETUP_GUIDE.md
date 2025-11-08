@@ -67,7 +67,7 @@ Your NYC 311 ETL pipeline will appear as: `nyc_311_incremental_etl`
 
 ## Project Structure
 ```
-notebook/
+scripts/
 ├── Extraction.py              # Data extraction module
 ├── Transformation.py          # Data transformation module  
 ├── Loading.py                 # Data loading module

@@ -424,7 +424,7 @@ astro dev ps  # All containers: Up
 az resource list --resource-group urban-cities-rg --output table
 
 # Database status
-python notebook/check_table.py
+python scripts/sql/create_sql_table.py
 ```
 
 ### Regular Maintenance

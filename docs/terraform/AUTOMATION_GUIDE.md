@@ -129,7 +129,7 @@ sql_admin_password = "D030avbang@@"
 ### Environment Variables (.env files)
 Located in:
 - `astro-airflow/.env` (for Airflow DAGs)
-- `notebook/.env` (for standalone scripts)
+- `\.env` (for standalone scripts)
 
 Key variables:
 ```bash
@@ -240,8 +240,8 @@ cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\
 - Infrastructure creates successfully even if provisioners fail
 - Manual execution option available:
   ```powershell
-  python notebook/create_sql_table.py
-  python notebook/create_adf_pipeline.py
+  python scripts/sql/create_sql_table.py
+  python scripts/adf/create_adf_pipeline.py
   ```
 
 ### 4. State Management
@@ -268,7 +268,7 @@ cd "C:\Users\David Ibanga\Data Engineering practicals\Urban_Cities_live_Service\
 **Solution**: 
 1. Check if provisioner has `on_failure = continue` (should be present)
 2. Wait 5-10 minutes for role propagation
-3. Manually run: `python notebook/create_adf_pipeline.py`
+3. Manually run: `python scripts/adf/create_adf_pipeline.py`
 
 ### Issue: Firewall Rule Blocks Connection
 **Symptom**: Cannot connect to SQL Server from local machine
@@ -404,7 +404,7 @@ astro dev ps  # All containers running
 az resource list --resource-group urban-cities-rg --output table
 
 # SQL Database health
-python notebook/check_table.py
+python scripts/sql/create_sql_table.py
 ```
 
 ### Documentation
