@@ -39,8 +39,12 @@ STATE_FILE = '/usr/local/airflow/include/data/etl_state.json'
 
 def load_state():
     """Load last processed timestamp from state file"""
+    # Check for FULL_HISTORICAL_LOAD environment variable or DAG config
+    days_back = int(os.getenv('HISTORICAL_DAYS_BACK', '30'))
+    force_full_load = os.getenv('FORCE_FULL_LOAD', 'false').lower() == 'true'
+    
     try:
-        if os.path.exists(STATE_FILE):
+        if os.path.exists(STATE_FILE) and not force_full_load:
             with open(STATE_FILE, 'r') as f:
                 state = json.load(f)
                 timestamp = state.get('last_processed_time')
@@ -51,12 +55,15 @@ def load_state():
                         timestamp = timestamp.split('.')[0]
                     if ' ' in timestamp:
                         timestamp = timestamp.replace(' ', 'T')
+                    print(f"Incremental load from: {timestamp}")
                     return timestamp
     except Exception as e:
         print(f"Error loading state: {e}")
     
-    # Default to 24 hours ago if no state exists
-    return (datetime.now() - timedelta(hours=24)).isoformat()
+    # Default to configured days back for full historical load
+    historical_timestamp = (datetime.now() - timedelta(days=days_back)).isoformat()
+    print(f"Full historical load: {days_back} days back from {historical_timestamp}")
+    return historical_timestamp
 
 def save_state(timestamp):
     """Save last processed timestamp to state file"""
@@ -243,10 +250,106 @@ def load_to_azure(**context):
     
     return result
 
+def create_sql_table(**context):
+    """Create SQL table if it doesn't exist"""
+    print("=" * 50)
+    print("STEP 4: ENSURING SQL TABLE EXISTS")
+    print("=" * 50)
+    
+    import pyodbc
+    
+    # Get SQL credentials
+    server = os.getenv('SQL_SERVER')
+    database = os.getenv('SQL_DATABASE')
+    username = os.getenv('SQL_USERNAME')
+    password = os.getenv('SQL_PASSWORD')
+    
+    print(f"\nConnecting to: {server}/{database}")
+    
+    # Connection string
+    conn_str = (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password}"
+    )
+    
+    # SQL CREATE TABLE statement (idempotent - only creates if not exists)
+    create_table_sql = """
+    IF OBJECT_ID('dbo.nyc_311_requests', 'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.nyc_311_requests (
+            unique_key VARCHAR(50) PRIMARY KEY,
+            created_date DATETIME NOT NULL,
+            closed_date DATETIME,
+            agency VARCHAR(50),
+            complaint_type VARCHAR(100),
+            descriptor VARCHAR(200),
+            borough VARCHAR(50),
+            status VARCHAR(50),
+            latitude FLOAT,
+            longitude FLOAT,
+            created_year INT,
+            created_month INT,
+            created_day INT,
+            created_hour INT,
+            created_weekday VARCHAR(20),
+            resolution_hours FLOAT,
+            is_closed BIT,
+            has_location BIT,
+            processed_at DATETIME,
+            data_quality_score FLOAT
+        );
+        
+        CREATE INDEX idx_created_date ON dbo.nyc_311_requests(created_date);
+        CREATE INDEX idx_agency ON dbo.nyc_311_requests(agency);
+        CREATE INDEX idx_complaint_type ON dbo.nyc_311_requests(complaint_type);
+        CREATE INDEX idx_borough ON dbo.nyc_311_requests(borough);
+        CREATE INDEX idx_status ON dbo.nyc_311_requests(status);
+        
+        PRINT 'Table nyc_311_requests created successfully';
+    END
+    ELSE
+    BEGIN
+        PRINT 'Table nyc_311_requests already exists';
+    END
+    """
+    
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+        print("✓ Connected to SQL Database")
+        
+        cursor.execute(create_table_sql)
+        conn.commit()
+        print("✓ Table verification/creation complete")
+        
+        # Verify table exists
+        cursor.execute("""
+            SELECT COUNT(*) as column_count
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = 'nyc_311_requests'
+        """)
+        column_count = cursor.fetchone()[0]
+        print(f"✓ Table has {column_count} columns")
+        
+        cursor.close()
+        conn.close()
+        
+        print("=" * 50)
+        return {'status': 'success', 'columns': column_count}
+        
+    except Exception as e:
+        print(f"Error creating SQL table: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
 def trigger_adf_pipeline(**context):
     """Trigger Azure Data Factory pipeline to copy master file to SQL Database"""
     print("=" * 50)
-    print("STEP 4: TRIGGERING AZURE DATA FACTORY PIPELINE")
+    print("STEP 5: TRIGGERING AZURE DATA FACTORY PIPELINE")
     print("=" * 50)
     
     # Initialize Azure loader
@@ -403,6 +506,12 @@ load_azure = PythonOperator(
     dag=dag
 )
 
+create_table = PythonOperator(
+    task_id='create_sql_table',
+    python_callable=create_sql_table,
+    dag=dag
+)
+
 trigger_adf = PythonOperator(
     task_id='trigger_adf_pipeline',
     python_callable=trigger_adf_pipeline,
@@ -425,4 +534,4 @@ cleanup = PythonOperator(
 end = EmptyOperator(task_id='end', dag=dag, trigger_rule='all_done')
 
 # Define task dependencies
-start >> extract >> transform >> load_azure >> trigger_adf >> update_etl_state >> cleanup >> end
+start >> extract >> transform >> load_azure >> create_table >> trigger_adf >> update_etl_state >> cleanup >> end
